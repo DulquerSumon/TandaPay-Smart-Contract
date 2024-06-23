@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import {Test, console2} from "forge-std/Test.sol";
-import {TandaPay, Ownable} from "../../src/TandaPay.sol";
+import {TandaPay, Secretary} from "../../src/TandaPay.sol";
 import {Token} from "../../src/Token.sol";
 
 contract TandaPayTest is Test {
@@ -55,7 +55,7 @@ contract TandaPayTest is Test {
         vm.startPrank(member1);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Ownable.OwnableUnauthorizedSecretary.selector,
+                Secretary.SecretaryUnauthorizedSecretary.selector,
                 member1
             )
         );
@@ -75,7 +75,7 @@ contract TandaPayTest is Test {
         vm.startPrank(member1);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Ownable.OwnableUnauthorizedSecretary.selector,
+                Secretary.SecretaryUnauthorizedSecretary.selector,
                 member1
             )
         );
@@ -386,7 +386,7 @@ contract TandaPayTest is Test {
         vm.startPrank(member1);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Ownable.OwnableUnauthorizedSecretary.selector,
+                Secretary.SecretaryUnauthorizedSecretary.selector,
                 member1
             )
         );
@@ -402,7 +402,7 @@ contract TandaPayTest is Test {
         vm.startPrank(member1);
         vm.expectRevert(
             abi.encodeWithSelector(
-                Ownable.OwnableUnauthorizedSecretary.selector,
+                Secretary.SecretaryUnauthorizedSecretary.selector,
                 member1
             )
         );

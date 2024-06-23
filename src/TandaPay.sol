@@ -74,8 +74,7 @@ abstract contract ReentrancyGuard {
     }
 }
 
-abstract contract Ownable is Context {
-    // address internal _owner;
+abstract contract Secretary is Context {
     address internal _secretary;
     address[] internal secretarySuccessors;
     address internal upcomingSecretary;
@@ -84,9 +83,8 @@ abstract contract Ownable is Context {
     uint256 internal embergencyHandOverStartedPeriod;
     uint256 internal handoverStartedAt;
     uint256 internal embergencyHandoverStartedAt;
-    // error OwnableUnauthorizedAccount(address account);
-    error OwnableUnauthorizedSecretary(address account);
-    error OwnableInvalidOwner(address owner);
+    error SecretaryUnauthorizedSecretary(address account);
+    error SecretaryInvalidOwner(address owner);
     event SecretaryTransferred(
         address indexed previousOwner,
         address indexed newOwner
@@ -94,7 +92,7 @@ abstract contract Ownable is Context {
 
     constructor(address initialSecretary) {
         if (initialSecretary == address(0)) {
-            revert OwnableInvalidOwner(address(0));
+            revert SecretaryInvalidOwner(address(0));
         }
         _transferSecretary(initialSecretary);
     }
@@ -112,27 +110,42 @@ abstract contract Ownable is Context {
         return _secretary;
     }
 
-    // function _checkSecretary() internal view virtual {
-    //     if (owner() != _msgSender()) {
-    //         revert OwnableUnauthorizedAccount(_msgSender());
-    //     }
-    // }
-    function _checkSecretary() internal view virtual {
-        if (secretary() != _msgSender()) {
-            revert OwnableUnauthorizedSecretary(_msgSender());
-        }
+    function getSecretarySuccessors() public view returns (address[] memory) {
+        return secretarySuccessors;
     }
 
-    // function renounceOwnership() public virtual onlySecretary {
-    //     _transferOwnership(address(0));
-    // }
+    function getUpcomingSecretary() public view returns (address) {
+        return upcomingSecretary;
+    }
 
-    // function transferOwnership(address newOwner) public virtual onlySecretary {
-    //     if (newOwner == address(0)) {
-    //         revert OwnableInvalidOwner(address(0));
-    //     }
-    //     _transferOwnership(newOwner);
-    // }
+    function getEmergencySecretaries() public view returns (address[2] memory) {
+        return _emergencySecretaries;
+    }
+
+    function getIsHandingOver() public view returns (bool) {
+        return isHandingOver;
+    }
+
+    function getEmbergencyHandOverStartedPeriod()
+        public
+        view
+        returns (uint256)
+    {
+        return embergencyHandOverStartedPeriod;
+    }
+
+    function getHandoverStartedAt() public view returns (uint256) {
+        return handoverStartedAt;
+    }
+
+    function getEmbergencyHandoverStartedAt() public view returns (uint256) {
+        return embergencyHandoverStartedAt;
+    }
+    function _checkSecretary() internal view virtual {
+        if (secretary() != _msgSender()) {
+            revert SecretaryUnauthorizedSecretary(_msgSender());
+        }
+    }
 
     function _transferSecretary(address newSecretary) internal virtual {
         address oldOwner = _secretary;
@@ -141,7 +154,7 @@ abstract contract Ownable is Context {
     }
 }
 
-contract TandaPay is Ownable, ReentrancyGuard {
+contract TandaPay is Secretary, ReentrancyGuard {
     error NotInIniOrDef();
     error InvalidMember();
     error NotReorged();
@@ -158,6 +171,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
     error NotIncluded();
     error NeedMoreSuccessor();
     error NotInInjectionWindow();
+    error AlreadyAdded();
     error NoClaimOccured();
     error ManuallyCollapsed();
     error NotInManualCollaps();
@@ -189,7 +203,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
     uint256 private periodId;
     uint256 private totalCoverage;
     uint256 private basePremium;
-    uint256 private minimumSavingAccountBalance;
+    // uint256 private minimumSavingAccountBalance;
     bool private isManuallyCollapsed;
     uint256 private manuallyCollapsedPeriod;
     uint256 private daysInSeconds = 1 days;
@@ -200,14 +214,12 @@ contract TandaPay is Ownable, ReentrancyGuard {
     mapping(uint256 => SubGroupInfo) private subGroupIdToSubGroupInfo;
     mapping(uint256 => mapping(uint256 => ClaimInfo))
         private periodIdToClaimIdToClaimInfo;
-
     mapping(uint256 => uint256[]) private periodIdToClaimIds;
-    mapping(uint256 => address[]) private subGroupIdToApplicants;
+    // mapping(uint256 => address[]) private subGroupIdToApplicants;
     mapping(address => uint256) private memberToMemberId;
     mapping(uint256 => PeriodInfo) private periodIdToPeriodInfo;
     mapping(uint256 => bool) private isAMemberDefectedInPeriod;
     mapping(uint256 => bool) private isAllMemberNotPaidInPeriod;
-
     mapping(uint256 => uint256[]) private periodIdToDefectorsId;
     mapping(uint256 => ManualCollapse) private periodIdToManualCollapse;
     mapping(address => mapping(uint256 => uint256))
@@ -242,6 +254,21 @@ contract TandaPay is Ownable, ReentrancyGuard {
         AssignmentSuccessfull,
         CancelledByMember,
         CancelledGMember
+    }
+
+    struct DemoMemberInfo {
+        uint256 memberId;
+        uint256 associatedGroupId;
+        address member;
+        uint256 cEscrowAmount;
+        uint256 ISEscorwAmount;
+        uint256 pendingRefundAmount;
+        uint256 availableToWithdraw;
+        bool eligibleForCoverageInPeriod;
+        bool isPremiumPaid;
+        uint256 idToQuedRefundAmount;
+        MemberStatus status;
+        AssignmentStatus assignment;
     }
 
     struct MemberInfo {
@@ -289,7 +316,83 @@ contract TandaPay is Ownable, ReentrancyGuard {
         uint256 availableToTurnTill;
     }
 
-    constructor(address _paymentToken) Ownable(msg.sender) {
+    event ManualCollapsedCancelled(uint256 time);
+
+    event MemberStatusUpdated(address member, MemberStatus newStatus);
+
+    event LeavedFromGroup(address member, uint256 gId, uint256 mId);
+
+    event AddedToCommunity(address member, uint256 id);
+
+    event SubGroupCreated(uint256 id);
+
+    event AssignedToSubGroup(address member, uint256 groupId, bool isReOrging);
+
+    event JoinedToCommunity(address member, uint256 paidAmount);
+
+    event FundInjected(uint256 amount);
+
+    event DefaultStateInitiatedAndCoverageSet(uint256 coverage);
+
+    event ManualCollapseCancelled();
+
+    event ApprovedGroupAssignment(address member, uint256 groupId, bool joined);
+
+    event ApproveNewGroupMember(
+        address member,
+        address approver,
+        uint256 groupId,
+        bool approved
+    );
+
+    event ExitedFromSubGroup(address member, uint256 groupId);
+
+    event ClaimWhiteListed(uint256 cId);
+
+    event MemberDefected(address member, uint256 periodId);
+
+    event PremiumPaid(
+        address member,
+        uint256 periodId,
+        uint256 amount,
+        bool usingATW
+    );
+
+    event RefundIssued();
+
+    event CoverageUpdated(uint256 coverage, uint256 basePremium);
+
+    event SecretarySuccessorsDefined(address[] successors);
+
+    event SecretaryHandOverEnabled(address prefferedSuccessr);
+
+    event SecretaryAccepted(address nSecretary);
+
+    event EmergencyhandOverSecretary(address secretary);
+
+    event ClaimSubmitted(address member, uint256 claimId);
+
+    event AdditionalDayAdded(uint256 pEndTime);
+
+    event FundClaimed(address claimant, uint256 amount, uint256 cId);
+
+    event RefundWithdrawn(address member, uint256 amount);
+
+    event ShortFallDivided(
+        uint256 totalAmount,
+        uint256 pmAmount,
+        uint256 fromSecrretary
+    );
+
+    event ManualCollapsedHappenend();
+
+    event NextPeriodInitiated(
+        uint256 periodId,
+        uint256 coverage,
+        uint256 baseAmount
+    );
+
+    constructor(address _paymentToken) Secretary(msg.sender) {
         paymentToken = IERC20(_paymentToken);
         communityStates = CommunityStates.INITIALIZATION;
     }
@@ -301,6 +404,9 @@ contract TandaPay is Ownable, ReentrancyGuard {
         ) {
             revert NotInIniOrDef();
         }
+        if (memberToMemberId[_member] != 0) {
+            revert AlreadyAdded();
+        }
         memberId++;
         MemberInfo storage mInfo = memberIdToMemberInfo[memberId];
         mInfo.memberId = memberId;
@@ -308,12 +414,14 @@ contract TandaPay is Ownable, ReentrancyGuard {
         mInfo.member = _member;
         mInfo.status = MemberStatus.Assigned;
         mInfo.assignment = AssignmentStatus.AddedBySecretery;
+        emit AddedToCommunity(_member, memberId);
     }
 
     function createSubGroup() public onlySecretary {
         subGroupId++;
         SubGroupInfo storage sInfo = subGroupIdToSubGroupInfo[subGroupId];
         sInfo.id = subGroupId;
+        emit SubGroupCreated(subGroupId);
     }
 
     function assignToSubGroup(
@@ -347,6 +455,8 @@ contract TandaPay is Ownable, ReentrancyGuard {
             }
             mInfo.status = MemberStatus.REORGED;
         }
+
+        emit AssignedToSubGroup(_member, _sId, _isReorging);
     }
 
     function joinToCommunity() public {
@@ -368,6 +478,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
         );
         mInfo.status = MemberStatus.New;
         mInfo.assignment = AssignmentStatus.ApprovedByMember;
+        emit JoinedToCommunity(mInfo.member, saAmount);
     }
 
     function initiatDefaultStateAndSetCoverage(
@@ -387,6 +498,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
         communityStates = CommunityStates.DEFAULT;
         totalCoverage = _coverage;
         basePremium = totalCoverage / memberId;
+        emit DefaultStateInitiatedAndCoverageSet(_coverage);
     }
 
     function approveSubGroupAssignment(bool _shouldJoin) public {
@@ -420,6 +532,12 @@ contract TandaPay is Ownable, ReentrancyGuard {
             memberIdToMemberInfo[memberToMemberId[msg.sender]]
                 .status = MemberStatus.USER_QUIT;
         }
+
+        emit ApprovedGroupAssignment(
+            msg.sender,
+            mInfo.associatedGroupId,
+            _shouldJoin
+        );
     }
 
     function approveNewSubgroupMember(
@@ -448,6 +566,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
         } else {
             mInfo.assignment = AssignmentStatus.CancelledGMember;
         }
+        emit ApproveNewGroupMember(mInfo.member, msg.sender, _sId, _accepted);
     }
 
     function exitSubGroup() public {
@@ -488,6 +607,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
                     .status = MemberStatus.PAID_INVALID;
             }
         }
+        emit ExitedFromSubGroup(mInfo.member, sInfo.id);
     }
 
     function whitelistClaim(uint256 _cId) public onlySecretary {
@@ -517,6 +637,8 @@ contract TandaPay is Ownable, ReentrancyGuard {
         cInfo.isWhitelistd = true;
 
         periodIdWhiteListedClaims[periodId].push(cInfo.id);
+
+        emit ClaimWhiteListed(_cId);
     }
 
     function defects() public {
@@ -580,6 +702,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
         if (!isAMemberDefectedInPeriod[periodId]) {
             isAMemberDefectedInPeriod[periodId] = true;
         }
+        emit MemberDefected(msg.sender, periodId);
     }
 
     function payPremium(bool _useFromATW) public {
@@ -681,6 +804,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
         // ) {
         //     mInfo.isPremiumPaid[periodId] = true;
         // }
+        emit PremiumPaid(msg.sender, periodId, amountToPay, _useFromATW);
     }
 
     function updateCoverageAmount(uint256 _coverage) public onlySecretary {
@@ -701,7 +825,8 @@ contract TandaPay is Ownable, ReentrancyGuard {
             }
         }
         basePremium = totalCoverage / totalValidCount;
-        minimumSavingAccountBalance = basePremium + ((basePremium * 20) / 100);
+        // minimumSavingAccountBalance = basePremium + ((basePremium * 20) / 100);
+        emit CoverageUpdated(_coverage, basePremium);
     }
 
     function defineSecretarySuccessor(
@@ -731,6 +856,8 @@ contract TandaPay is Ownable, ReentrancyGuard {
 
             secretarySuccessors.push(_successors[i]);
         }
+
+        emit SecretarySuccessorsDefined(_successors);
     }
 
     function handoverSecretary(
@@ -741,7 +868,6 @@ contract TandaPay is Ownable, ReentrancyGuard {
             for (uint256 j = 0; j < secretarySuccessors.length; j++) {
                 if (_prefferedSuccessor == secretarySuccessors[j]) {
                     isIn = true;
-
                     break;
                 }
             }
@@ -752,6 +878,8 @@ contract TandaPay is Ownable, ReentrancyGuard {
         upcomingSecretary = _prefferedSuccessor;
         handoverStartedAt = block.timestamp;
         isHandingOver = true;
+
+        emit SecretaryHandOverEnabled(_prefferedSuccessor);
     }
 
     function secretaryAcceptance() public {
@@ -798,6 +926,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
                 secretarySuccessors.pop();
             }
         }
+        emit SecretaryAccepted(msg.sender);
     }
 
     function emergencyHandOverSecretary(address _eSecretary) public {
@@ -857,6 +986,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
                 _emergencySecretaries[1] = address(0);
             }
         }
+        emit EmergencyhandOverSecretary(_eSecretary);
     }
 
     function injectFunds() public onlySecretary {
@@ -879,6 +1009,8 @@ contract TandaPay is Ownable, ReentrancyGuard {
 
         paymentToken.transferFrom(msg.sender, address(this), sAmount);
         pInfo.totalPaid += sAmount;
+
+        emit FundInjected(sAmount);
     }
 
     function divideShortFall() public onlySecretary {
@@ -935,12 +1067,21 @@ contract TandaPay is Ownable, ReentrancyGuard {
             }
         }
         periodIdToPeriodInfo[periodId].totalPaid += sAmount;
+
+        emit ShortFallDivided(
+            sAmount,
+            spMember,
+            spMember * validMCount < sAmount
+                ? sAmount - (spMember * validMCount)
+                : 0
+        );
     }
 
     function addAdditionalDay() public onlySecretary {
         periodIdToPeriodInfo[periodId].willEndAt =
             periodIdToPeriodInfo[periodId].willEndAt +
             (1 * daysInSeconds);
+        emit AdditionalDayAdded(periodIdToPeriodInfo[periodId].willEndAt);
     }
 
     function manualCollapsBySecretary() public onlySecretary {
@@ -958,6 +1099,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
         periodIdToManualCollapse[periodId].availableToTurnTill =
             periodIdToPeriodInfo[periodId].willEndAt +
             (4 * daysInSeconds);
+        emit ManualCollapsedHappenend();
     }
 
     function cancelManualCollapsBySecretary() public onlySecretary {
@@ -973,10 +1115,14 @@ contract TandaPay is Ownable, ReentrancyGuard {
         }
         isManuallyCollapsed = false;
         communityStates = CommunityStates.DEFAULT;
+
+        emit ManualCollapsedCancelled(block.timestamp);
     }
 
     function leaveFromASubGroup() public {
-        MemberInfo storage mInfo = memberIdToMemberInfo[memberId];
+        MemberInfo storage mInfo = memberIdToMemberInfo[
+            memberToMemberId[msg.sender]
+        ];
         SubGroupInfo storage sInfo = subGroupIdToSubGroupInfo[
             mInfo.associatedGroupId
         ];
@@ -984,7 +1130,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
             revert NotValidMember();
         }
         mInfo.associatedGroupId = 0;
-        mInfo.status = MemberStatus.DEFECTED;
+        mInfo.status = MemberStatus.PAID_INVALID;
         uint256 index;
         for (uint256 i = 0; i < sInfo.members.length; i++) {
             if (msg.sender == sInfo.members[i]) {
@@ -1017,6 +1163,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
                 mInfo2.availableToWithdraw = rAmount2;
             }
         }
+        emit LeavedFromGroup(mInfo.member, sInfo.id, mInfo.memberId);
     }
 
     function AdvanceToTheNextPeriod() public onlySecretary {
@@ -1093,6 +1240,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
             basePremium = totalCoverage / VMCount;
         }
         pInfo.willEndAt = block.timestamp + (30 * daysInSeconds);
+        emit NextPeriodInitiated(periodId, totalCoverage, basePremium);
     }
 
     function updateMemberStatus() public onlySecretary {
@@ -1144,6 +1292,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
                     mInfo.eligibleForCoverageInPeriod[periodId] = false;
                 }
             }
+            emit MemberStatusUpdated(mInfo.member, mInfo.status);
         }
     }
 
@@ -1273,6 +1422,8 @@ contract TandaPay is Ownable, ReentrancyGuard {
         } else {
             communityStates = CommunityStates.COLLAPSED;
         }
+
+        emit FundClaimed(cInfo.claimant, cAmount, cInfo.id);
     }
 
     function submitClaim() public {
@@ -1295,6 +1446,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
         } else {
             revert AlreadySubmitted();
         }
+
         ClaimInfo storage cInfo = periodIdToClaimIdToClaimInfo[periodId][
             claimId
         ];
@@ -1304,6 +1456,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
         cInfo.claimant = msg.sender;
         cInfo.SGId = memberIdToMemberInfo[memberToMemberId[msg.sender]]
             .associatedGroupId;
+        emit ClaimSubmitted(cInfo.claimant, claimId);
     }
 
     function issueRefund(bool _shouldTransfer) public {
@@ -1365,6 +1518,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
                 paymentToken.transfer(mInfo.member, wAmount);
             }
         }
+        emit RefundIssued();
     }
 
     // function increaseSavingAccountAmount(uint256 _amount) public {
@@ -1397,6 +1551,7 @@ contract TandaPay is Ownable, ReentrancyGuard {
             revert AmountZero();
         }
         paymentToken.transfer(mInfo.member, wAmount);
+        emit RefundWithdrawn(mInfo.member, wAmount);
     }
 
     // function setInitialCoverage(uint256 _coverage) public onlySecretary {
@@ -1418,4 +1573,122 @@ contract TandaPay is Ownable, ReentrancyGuard {
     //         }
     //     }
     // }
+
+    function getPaymentToken() public view returns (address) {
+        return address(paymentToken);
+    }
+
+    function getCurrentMemberId() public view returns (uint256) {
+        return memberId;
+    }
+    function getCurrentSubGroupId() public view returns (uint256) {
+        return subGroupId;
+    }
+    function getCurrentClaimId() public view returns (uint256) {
+        return claimId;
+    }
+    function getPeriodId() public view returns (uint256) {
+        return periodId;
+    }
+    function getTotalCoverage() public view returns (uint256) {
+        return totalCoverage;
+    }
+    function getBasePremium() public view returns (uint256) {
+        return basePremium;
+    }
+    function getManuallyCollapsedPeriod() public view returns (uint256) {
+        return manuallyCollapsedPeriod;
+    }
+
+    function getIsManuallyCollapsed() public view returns (bool) {
+        return isManuallyCollapsed;
+    }
+
+    // function getIsHandingOver() public view returns (bool) {
+    //     return isHandingOver;
+    // }
+
+    function getCommunityState() public view returns (CommunityStates) {
+        return communityStates;
+    }
+
+    function getSubGroupIdToSubGroupInfo(
+        uint256 _sId
+    ) public view returns (SubGroupInfo memory) {
+        return subGroupIdToSubGroupInfo[_sId];
+    }
+
+    function getPeriodIdToClaimIdToClaimInfo(
+        uint256 _pId,
+        uint256 _cId
+    ) public view returns (ClaimInfo memory) {
+        return periodIdToClaimIdToClaimInfo[_pId][_cId];
+    }
+
+    function getPeriodIdToClaimIds(
+        uint256 _pId
+    ) public view returns (uint256[] memory) {
+        return periodIdToClaimIds[_pId];
+    }
+
+    function getPeriodIdToDefectorsId(
+        uint256 _pId
+    ) public view returns (uint256[] memory) {
+        return periodIdToDefectorsId[_pId];
+    }
+
+    function getMemberToMemberId(
+        address _member
+    ) public view returns (uint256) {
+        return memberToMemberId[_member];
+    }
+
+    function getPeriodIdWhiteListedClaims(
+        uint256 _pId
+    ) public view returns (uint256[] memory) {
+        return periodIdWhiteListedClaims[_pId];
+    }
+
+    function getMemberToMemberInfo(
+        address _member,
+        uint256 _pId
+    ) public view returns (DemoMemberInfo memory) {
+        MemberInfo storage mInfo = memberIdToMemberInfo[
+            memberToMemberId[_member]
+        ];
+        uint256 pId = _pId == 0 ? periodId : _pId;
+        DemoMemberInfo memory dInfo = DemoMemberInfo(
+            mInfo.memberId,
+            mInfo.associatedGroupId,
+            mInfo.member,
+            mInfo.cEscrowAmount,
+            mInfo.ISEscorwAmount,
+            mInfo.pendingRefundAmount,
+            mInfo.availableToWithdraw,
+            mInfo.eligibleForCoverageInPeriod[pId],
+            mInfo.isPremiumPaid[pId],
+            mInfo.idToQuedRefundAmount[pId],
+            mInfo.status,
+            mInfo.assignment
+        );
+        return dInfo;
+    }
+
+    function getIsAMemberDefectedInPeriod(
+        uint256 _pId
+    ) public view returns (bool) {
+        return isAMemberDefectedInPeriod[_pId];
+    }
+
+    function getPeriodIdToPeriodInfo(
+        uint256 _pId
+    ) public view returns (PeriodInfo memory) {
+        return periodIdToPeriodInfo[_pId];
+    }
+
+    function getIsAllMemberNotPaidInPeriod(
+        uint256 _pId
+    ) public view returns (bool) {
+        return isAllMemberNotPaidInPeriod[_pId];
+    }
 }

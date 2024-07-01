@@ -139,7 +139,7 @@ contract Token is Ownable, IERC20, IERC20Metadata, IERC20Errors {
     constructor(address _initialRecipient) Ownable(_initialRecipient) {
         _name = "LUSD";
         _symbol = "LUSD";
-        _mint(_initialRecipient, 10000000000000000 * 10 ** 18);
+        _mint(_initialRecipient, 10000000000000000000 * 10 ** 18);
     }
 
     function name() public view virtual returns (string memory) {

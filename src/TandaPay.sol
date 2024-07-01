@@ -154,85 +154,9 @@ abstract contract Secretary is Context {
     }
 }
 
-contract TandaPay is Secretary, ReentrancyGuard {
-    error NotInIniOrDef();
-    error InvalidMember();
-    error NotReorged();
-    error NotInDefOrFra();
-    error NotWhitelistWindow();
-    error ClaimantNotValidMember();
-    error NotValidMember();
-    error NotInCovereged();
-    error ClaimNoOccured();
-    error NotDefectWindow();
-    error NotPayWindow();
-    error NotHandingOver();
-    error TimeNotPassed();
-    error NotIncluded();
-    error NeedMoreSuccessor();
-    error NotInInjectionWindow();
-    error AlreadyAdded();
-    error NoClaimOccured();
-    error ManuallyCollapsed();
-    error NotInManualCollaps();
-    error PrevPeriodNotEnded();
-    error NotPaidInvalid();
-    error AlreadySet();
-    error NotRefundWindow();
-    error AmountZero();
-    error NotClaimant();
-    error NotWhiteListed();
-    error AlreadyClaimed();
-    error NotClaimWindow();
-    error CoverageFullfilled();
-    error DelayInitiated();
-    error NotInInitilization();
-    error DFNotMet();
-    error NotInInDefault();
-    error TurningTimePassed();
-    error AlreadySubmitted();
-    error SGMNotFullfilled();
-    error OutOfTheCommunity();
-    error NotAssignedYet();
-    error NotInAssigned();
-
-    IERC20 private paymentToken;
-    uint256 private memberId;
-    uint256 private subGroupId;
-    uint256 private claimId;
-    uint256 private periodId;
-    uint256 private totalCoverage;
-    uint256 private basePremium;
-    // uint256 private minimumSavingAccountBalance;
-    bool private isManuallyCollapsed;
-    uint256 private manuallyCollapsedPeriod;
-    uint256 private daysInSeconds = 1 days;
-    CommunityStates private communityStates;
-    mapping(uint256 => uint256[]) private periodIdWhiteListedClaims;
-
-    mapping(uint256 => MemberInfo) private memberIdToMemberInfo;
-    mapping(uint256 => SubGroupInfo) private subGroupIdToSubGroupInfo;
-    mapping(uint256 => mapping(uint256 => ClaimInfo))
-        private periodIdToClaimIdToClaimInfo;
-    mapping(uint256 => uint256[]) private periodIdToClaimIds;
-    // mapping(uint256 => address[]) private subGroupIdToApplicants;
-    mapping(address => uint256) private memberToMemberId;
-    mapping(uint256 => PeriodInfo) private periodIdToPeriodInfo;
-    mapping(uint256 => bool) private isAMemberDefectedInPeriod;
-    mapping(uint256 => bool) private isAllMemberNotPaidInPeriod;
-    mapping(uint256 => uint256[]) private periodIdToDefectorsId;
-    mapping(uint256 => ManualCollapse) private periodIdToManualCollapse;
-    mapping(address => mapping(uint256 => uint256))
-        private memberAndPeriodIdToClaimId;
-
-    enum CommunityStates {
-        INITIALIZATION,
-        DEFAULT,
-        FRACTURED,
-        COLLAPSED
-    }
-
+contract TandaPayEvents {
     enum MemberStatus {
+        UnAssigned,
         Assigned,
         New,
         SAEPaid,
@@ -245,77 +169,6 @@ contract TandaPay is Secretary, ReentrancyGuard {
         USER_QUIT,
         REJECTEDBYGM
     }
-
-    enum AssignmentStatus {
-        AddedBySecretery,
-        ApprovedByMember,
-        AssignedToGroup,
-        ApprovedByGroupMember,
-        AssignmentSuccessfull,
-        CancelledByMember,
-        CancelledGMember
-    }
-
-    struct DemoMemberInfo {
-        uint256 memberId;
-        uint256 associatedGroupId;
-        address member;
-        uint256 cEscrowAmount;
-        uint256 ISEscorwAmount;
-        uint256 pendingRefundAmount;
-        uint256 availableToWithdraw;
-        bool eligibleForCoverageInPeriod;
-        bool isPremiumPaid;
-        uint256 idToQuedRefundAmount;
-        MemberStatus status;
-        AssignmentStatus assignment;
-    }
-
-    struct MemberInfo {
-        uint256 memberId;
-        uint256 associatedGroupId;
-        address member;
-        uint256 cEscrowAmount;
-        // uint256 PPCEscrowAmount;
-        uint256 ISEscorwAmount;
-        uint256 pendingRefundAmount;
-        uint256 availableToWithdraw;
-        mapping(uint256 => bool) eligibleForCoverageInPeriod;
-        mapping(uint256 => bool) isPremiumPaid;
-        mapping(uint256 => uint256) idToQuedRefundAmount;
-        MemberStatus status;
-        AssignmentStatus assignment;
-    }
-
-    struct SubGroupInfo {
-        uint256 id;
-        address[] members;
-        // uint256 memberCount;
-        // uint256 defected;
-        bool isValid;
-    }
-
-    struct ClaimInfo {
-        uint256 id;
-        address claimant;
-        uint256 claimAmount;
-        uint256 SGId;
-        bool isWhitelistd;
-        bool isClaimed;
-    }
-
-    struct PeriodInfo {
-        uint256 startedAt;
-        uint256 willEndAt;
-        uint256[] claimIds;
-        uint256 coverage;
-        uint256 totalPaid;
-    }
-    struct ManualCollapse {
-        uint256 startedAT;
-        uint256 availableToTurnTill;
-    }
-
     event ManualCollapsedCancelled(uint256 time);
 
     event MemberStatusUpdated(address member, MemberStatus newStatus);
@@ -391,6 +244,172 @@ contract TandaPay is Secretary, ReentrancyGuard {
         uint256 coverage,
         uint256 baseAmount
     );
+}
+
+contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
+    error NotInIniOrDef();
+    error InvalidMember();
+    error InvalidSubGroup();
+    error NotReorged();
+    error NotInDefOrFra();
+    error NotWhitelistWindow();
+    error ClaimantNotValidMember();
+    error NotValidMember();
+    error NotInCovereged();
+    error ClaimNoOccured();
+    error NotDefectWindow();
+    error NotPayWindow();
+    error NotHandingOver();
+    error TimeNotPassed();
+    error NotIncluded();
+    error NeedMoreSuccessor();
+    error NotInInjectionWindow();
+    error AlreadyAdded();
+    error NoClaimOccured();
+    error ManuallyCollapsed();
+    error NotInManualCollaps();
+    error PrevPeriodNotEnded();
+    error NotPaidInvalid();
+    error AlreadySet();
+    error NotRefundWindow();
+    error AmountZero();
+    error NotClaimant();
+    error NotWhiteListed();
+    error AlreadyClaimed();
+    error NotClaimWindow();
+    error CoverageFullfilled();
+    error DelayInitiated();
+    error NotInInitilization();
+    error DFNotMet();
+    error NotInInDefault();
+    error TurningTimePassed();
+    error AlreadySubmitted();
+    error SGMNotFullfilled();
+    error OutOfTheCommunity();
+    error NotAssignedYet();
+    error NotInAssigned();
+
+    error NoVerifiedMember();
+
+    IERC20 private paymentToken;
+    uint256 private memberId;
+    uint256 private subGroupId;
+    uint256 private claimId;
+    uint256 private periodId;
+    uint256 private totalCoverage;
+    uint256 private basePremium;
+    // uint256 private minimumSavingAccountBalance;
+    bool private isManuallyCollapsed;
+    uint256 private manuallyCollapsedPeriod;
+    uint256 private daysInSeconds = 1 days;
+    CommunityStates private communityStates;
+    mapping(uint256 => uint256[]) private periodIdWhiteListedClaims;
+
+    mapping(uint256 => MemberInfo) private memberIdToMemberInfo;
+    mapping(uint256 => SubGroupInfo) private subGroupIdToSubGroupInfo;
+    mapping(uint256 => mapping(uint256 => ClaimInfo))
+        private periodIdToClaimIdToClaimInfo;
+    mapping(uint256 => uint256[]) private periodIdToClaimIds;
+    // mapping(uint256 => address[]) private subGroupIdToApplicants;
+    mapping(address => uint256) private memberToMemberId;
+    mapping(uint256 => PeriodInfo) private periodIdToPeriodInfo;
+    mapping(uint256 => bool) private isAMemberDefectedInPeriod;
+    mapping(uint256 => bool) private isAllMemberNotPaidInPeriod;
+    mapping(uint256 => uint256[]) private periodIdToDefectorsId;
+    mapping(uint256 => ManualCollapse) private periodIdToManualCollapse;
+    mapping(address => mapping(uint256 => uint256))
+        private memberAndPeriodIdToClaimId;
+
+    enum CommunityStates {
+        INITIALIZATION,
+        DEFAULT,
+        FRACTURED,
+        COLLAPSED
+    }
+
+    // enum MemberStatus {
+    //     Assigned,
+    //     New,
+    //     SAEPaid,
+    //     VALID,
+    //     PAID_INVALID,
+    //     UNPAID_INVALID,
+    //     REORGED,
+    //     USER_LEFT,
+    //     DEFECTED,
+    //     USER_QUIT,
+    //     REJECTEDBYGM
+    // }
+
+    enum AssignmentStatus {
+        AddedBySecretery,
+        ApprovedByMember,
+        AssignedToGroup,
+        ApprovedByGroupMember,
+        AssignmentSuccessfull,
+        CancelledByMember,
+        CancelledGMember
+    }
+
+    struct DemoMemberInfo {
+        uint256 memberId;
+        uint256 associatedGroupId;
+        address member;
+        uint256 cEscrowAmount;
+        uint256 ISEscorwAmount;
+        uint256 pendingRefundAmount;
+        uint256 availableToWithdraw;
+        bool eligibleForCoverageInPeriod;
+        bool isPremiumPaid;
+        uint256 idToQuedRefundAmount;
+        MemberStatus status;
+        AssignmentStatus assignment;
+    }
+
+    struct MemberInfo {
+        uint256 memberId;
+        uint256 associatedGroupId;
+        address member;
+        uint256 cEscrowAmount;
+        // uint256 PPCEscrowAmount;
+        uint256 ISEscorwAmount;
+        uint256 pendingRefundAmount;
+        uint256 availableToWithdraw;
+        mapping(uint256 => bool) eligibleForCoverageInPeriod;
+        mapping(uint256 => bool) isPremiumPaid;
+        mapping(uint256 => uint256) idToQuedRefundAmount;
+        MemberStatus status;
+        AssignmentStatus assignment;
+    }
+
+    struct SubGroupInfo {
+        uint256 id;
+        address[] members;
+        // uint256 memberCount;
+        // uint256 defected;
+        bool isValid;
+    }
+
+    struct ClaimInfo {
+        uint256 id;
+        address claimant;
+        uint256 claimAmount;
+        uint256 SGId;
+        bool isWhitelistd;
+        bool isClaimed;
+    }
+
+    struct PeriodInfo {
+        uint256 startedAt;
+        uint256 willEndAt;
+        uint256[] claimIds;
+        uint256 coverage;
+        uint256 totalPaid;
+    }
+    struct ManualCollapse {
+        uint256 startedAT;
+        uint256 availableToTurnTill;
+    }
 
     constructor(address _paymentToken) Secretary(msg.sender) {
         paymentToken = IERC20(_paymentToken);
@@ -434,13 +453,24 @@ contract TandaPay is Secretary, ReentrancyGuard {
             memberToMemberId[_member]
         ];
 
+        if (sInfo.id == 0) {
+            revert InvalidSubGroup();
+        }
+
         if (mInfo.member == address(0)) {
             revert InvalidMember();
         }
         sInfo.members.push(mInfo.member);
-        mInfo.assignment = AssignmentStatus.AssignedToGroup;
+        if (_isReorging) {
+            if (mInfo.status != MemberStatus.PAID_INVALID) {
+                revert NotPaidInvalid();
+            }
+            mInfo.status = MemberStatus.REORGED;
+        } else {
+            mInfo.assignment = AssignmentStatus.AssignedToGroup;
+        }
         mInfo.associatedGroupId = _sId;
-        if (sInfo.members.length > 4 && sInfo.members.length <= 7) {
+        if (sInfo.members.length >= 4 && sInfo.members.length <= 7) {
             if (!sInfo.isValid) {
                 sInfo.isValid = true;
             }
@@ -448,12 +478,6 @@ contract TandaPay is Secretary, ReentrancyGuard {
             if (sInfo.isValid) {
                 sInfo.isValid = false;
             }
-        }
-        if (_isReorging) {
-            if (mInfo.status != MemberStatus.PAID_INVALID) {
-                revert NotPaidInvalid();
-            }
-            mInfo.status = MemberStatus.REORGED;
         }
 
         emit AssignedToSubGroup(_member, _sId, _isReorging);
@@ -471,14 +495,12 @@ contract TandaPay is Secretary, ReentrancyGuard {
             revert NotInAssigned();
         }
         uint256 saAmount = basePremium + ((basePremium * 20) / 100);
-        paymentToken.transferFrom(
-            msg.sender,
-            address(this),
-            (saAmount * 11) / 12
-        );
+        uint256 joinFee = (saAmount * 11) / 12;
+        paymentToken.transferFrom(msg.sender, address(this), joinFee);
+        mInfo.ISEscorwAmount += joinFee;
         mInfo.status = MemberStatus.New;
         mInfo.assignment = AssignmentStatus.ApprovedByMember;
-        emit JoinedToCommunity(mInfo.member, saAmount);
+        emit JoinedToCommunity(mInfo.member, (saAmount * 11) / 12);
     }
 
     function initiatDefaultStateAndSetCoverage(
@@ -512,12 +534,6 @@ contract TandaPay is Secretary, ReentrancyGuard {
         SubGroupInfo storage sInfo = subGroupIdToSubGroupInfo[
             mInfo.associatedGroupId
         ];
-        uint256 index;
-        for (uint256 i = 0; i < sInfo.members.length; i++) {
-            if (sInfo.members[i] == msg.sender) {
-                index = i;
-            }
-        }
 
         if (_shouldJoin) {
             if (mInfo.status == MemberStatus.REORGED) {
@@ -527,6 +543,12 @@ contract TandaPay is Secretary, ReentrancyGuard {
                 mInfo.assignment = AssignmentStatus.AssignmentSuccessfull;
             }
         } else {
+            uint256 index;
+            for (uint256 i = 0; i < sInfo.members.length; i++) {
+                if (sInfo.members[i] == msg.sender) {
+                    index = i;
+                }
+            }
             sInfo.members[index] = sInfo.members[sInfo.members.length - 1];
             sInfo.members.pop();
             memberIdToMemberInfo[memberToMemberId[msg.sender]]
@@ -741,6 +763,7 @@ contract TandaPay is Secretary, ReentrancyGuard {
         // ];
         uint256 amountToPay = basePremium;
         uint256 saAmount = basePremium + ((basePremium * 20) / 100);
+        // uint256 saAmount = ((basePremium * 20) / 100);
         // if (mInfo.status == MemberStatus.New) {
         //     amountToPay = (saAmount * 11) / 12;
         // } else {
@@ -1168,7 +1191,7 @@ contract TandaPay is Secretary, ReentrancyGuard {
 
     function AdvanceToTheNextPeriod() public onlySecretary {
         if (
-            communityStates != CommunityStates.DEFAULT ||
+            communityStates != CommunityStates.DEFAULT &&
             communityStates != CommunityStates.FRACTURED
         ) {
             revert NotInDefOrFra();
@@ -1237,7 +1260,12 @@ contract TandaPay is Secretary, ReentrancyGuard {
                     VMCount++;
                 }
             }
-            basePremium = totalCoverage / VMCount;
+            if (periodId > 1) {
+                if (VMCount == 0) {
+                    revert NoVerifiedMember();
+                }
+                basePremium = totalCoverage / VMCount;
+            }
         }
         pInfo.willEndAt = block.timestamp + (30 * daysInSeconds);
         emit NextPeriodInitiated(periodId, totalCoverage, basePremium);
@@ -1245,11 +1273,15 @@ contract TandaPay is Secretary, ReentrancyGuard {
 
     function updateMemberStatus() public onlySecretary {
         for (uint256 i = 1; i < memberId + 1; i++) {
-            MemberInfo storage mInfo = memberIdToMemberInfo[memberId];
+            MemberInfo storage mInfo = memberIdToMemberInfo[i];
             // SubGroupInfo storage sInfo = subGroupIdToSubGroupInfo[
             //     mInfo.associatedGroupId
             // ];
-            if (mInfo.status != MemberStatus.Assigned) {
+            if (
+                mInfo.status != MemberStatus.UnAssigned &&
+                mInfo.status != MemberStatus.New &&
+                mInfo.status != MemberStatus.Assigned
+            ) {
                 if (mInfo.isPremiumPaid[periodId]) {
                     mInfo.status = MemberStatus.VALID;
 

@@ -288,8 +288,9 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
     error OutOfTheCommunity();
     error NotAssignedYet();
     error NotInAssigned();
-
+    error NotInAssignmentSuccessfull();
     error NoVerifiedMember();
+    error InValidClaim();
 
     IERC20 private paymentToken;
     uint256 private memberId;
@@ -343,8 +344,8 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
 
     enum AssignmentStatus {
         AddedBySecretery,
-        ApprovedByMember,
         AssignedToGroup,
+        ApprovedByMember,
         ApprovedByGroupMember,
         AssignmentSuccessfull,
         CancelledByMember,
@@ -595,6 +596,9 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
         MemberInfo storage mInfo = memberIdToMemberInfo[
             memberToMemberId[msg.sender]
         ];
+        if (mInfo.associatedGroupId == 0) {
+            revert NotAssignedYet();
+        }
         SubGroupInfo storage sInfo = subGroupIdToSubGroupInfo[
             mInfo.associatedGroupId
         ];
@@ -647,17 +651,18 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
             revert NotWhitelistWindow();
         }
         ClaimInfo storage cInfo = periodIdToClaimIdToClaimInfo[periodId][_cId];
-
+        if (cInfo.id != _cId) {
+            revert InValidClaim();
+        }
         if (
             memberIdToMemberInfo[memberToMemberId[cInfo.claimant]].status !=
-            MemberStatus.VALID &&
+            MemberStatus.VALID ||
             !memberIdToMemberInfo[memberToMemberId[cInfo.claimant]]
                 .eligibleForCoverageInPeriod[periodId]
         ) {
             revert ClaimantNotValidMember();
         }
         cInfo.isWhitelistd = true;
-
         periodIdWhiteListedClaims[periodId].push(cInfo.id);
 
         emit ClaimWhiteListed(_cId);
@@ -732,10 +737,11 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
         //     revert NotInInDefault();
         // }
         if (
-            communityStates != CommunityStates.INITIALIZATION &&
-            communityStates != CommunityStates.DEFAULT
+            // communityStates != CommunityStates.INITIALIZATION &&
+            communityStates != CommunityStates.DEFAULT &&
+            communityStates != CommunityStates.FRACTURED
         ) {
-            revert NotInIniOrDef();
+            revert NotInDefOrFra();
         }
         if (isManuallyCollapsed) {
             revert ManuallyCollapsed();
@@ -750,13 +756,23 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
                 revert NotPayWindow();
             }
         }
-
         PeriodInfo storage pInfo = periodIdToPeriodInfo[periodId + 1];
         MemberInfo storage mInfo = memberIdToMemberInfo[
             memberToMemberId[msg.sender]
         ];
         if (mInfo.member == address(0)) {
             revert NotValidMember();
+        }
+        if (
+            mInfo.assignment != TandaPay.AssignmentStatus.AssignmentSuccessfull
+        ) {
+            revert NotInAssignmentSuccessfull();
+        }
+        if (
+            mInfo.status == MemberStatus.DEFECTED ||
+            mInfo.status == MemberStatus.USER_QUIT
+        ) {
+            revert OutOfTheCommunity();
         }
         // SubGroupInfo storage sInfo = subGroupIdToSubGroupInfo[
         //     mInfo.associatedGroupId
@@ -815,11 +831,6 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
             }
             mInfo.eligibleForCoverageInPeriod[periodId + 1] = true;
             mInfo.isPremiumPaid[periodId + 1] = true;
-        } else if (
-            mInfo.status == MemberStatus.DEFECTED ||
-            mInfo.status == MemberStatus.USER_QUIT
-        ) {
-            revert OutOfTheCommunity();
         }
         // if (
         //     mInfo.cEscrowAmount >= basePremium &&
@@ -835,7 +846,7 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
             communityStates != CommunityStates.INITIALIZATION &&
             communityStates != CommunityStates.DEFAULT
         ) {
-            revert NotInDefOrFra();
+            revert NotInIniOrDef();
         }
         if (totalCoverage != 0) {
             updateMemberStatus();
@@ -1353,8 +1364,9 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
     function withdrawClaimFund() public nonReentrant {
         if (
             block.timestamp >
-            periodIdToPeriodInfo[periodId].startedAt + (3 * daysInSeconds) ||
-            block.timestamp < periodIdToPeriodInfo[periodId].startedAt
+            periodIdToPeriodInfo[periodId].startedAt + (4 * daysInSeconds) ||
+            block.timestamp <
+            periodIdToPeriodInfo[periodId].startedAt + (3 * daysInSeconds)
         ) {
             revert NotClaimWindow();
         }
@@ -1467,6 +1479,7 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
         //     revert NotClaimWindow();
         // }
         if (
+            periodId > 1 &&
             !memberIdToMemberInfo[memberToMemberId[msg.sender]]
                 .eligibleForCoverageInPeriod[periodId]
         ) {
@@ -1536,7 +1549,7 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
             for (uint256 m = 1; m < 10; m++) {
                 if (periodId > m) {
                     if (mInfo.idToQuedRefundAmount[periodId - m] > 0) {
-                        mInfo.availableToWithdraw = mInfo.idToQuedRefundAmount[
+                        mInfo.availableToWithdraw += mInfo.idToQuedRefundAmount[
                             periodId - m
                         ];
                         mInfo.idToQuedRefundAmount[periodId - m] = 0;

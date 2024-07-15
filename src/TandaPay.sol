@@ -80,9 +80,9 @@ abstract contract Secretary is Context {
     address internal upcomingSecretary;
     address[2] internal _emergencySecretaries;
     bool internal isHandingOver;
-    uint256 internal embergencyHandOverStartedPeriod;
+    uint256 internal emergencyHandOverStartedPeriod;
     uint256 internal handoverStartedAt;
-    uint256 internal embergencyHandoverStartedAt;
+    uint256 internal emergencyHandoverStartedAt;
     error SecretaryUnauthorizedSecretary(address account);
     error SecretaryInvalidOwner(address owner);
     event SecretaryTransferred(
@@ -126,20 +126,16 @@ abstract contract Secretary is Context {
         return isHandingOver;
     }
 
-    function getEmbergencyHandOverStartedPeriod()
-        public
-        view
-        returns (uint256)
-    {
-        return embergencyHandOverStartedPeriod;
+    function getEmergencyHandOverStartedPeriod() public view returns (uint256) {
+        return emergencyHandOverStartedPeriod;
     }
 
     function getHandoverStartedAt() public view returns (uint256) {
         return handoverStartedAt;
     }
 
-    function getEmbergencyHandoverStartedAt() public view returns (uint256) {
-        return embergencyHandoverStartedAt;
+    function getEmergencyHandoverStartedAt() public view returns (uint256) {
+        return emergencyHandoverStartedAt;
     }
     function _checkSecretary() internal view virtual {
         if (secretary() != _msgSender()) {
@@ -262,6 +258,8 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
     error NotHandingOver();
     error TimeNotPassed();
     error NotIncluded();
+    error NotInSuccessorList();
+    error SamePeriod();
     error NeedMoreSuccessor();
     error NotInInjectionWindow();
     error AlreadyAdded();
@@ -291,6 +289,7 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
     error NotInAssignmentSuccessfull();
     error NoVerifiedMember();
     error InValidClaim();
+    error NotFirstSuccessor();
 
     IERC20 private paymentToken;
     uint256 private memberId;
@@ -305,7 +304,6 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
     uint256 private daysInSeconds = 1 days;
     CommunityStates private communityStates;
     mapping(uint256 => uint256[]) private periodIdWhiteListedClaims;
-
     mapping(uint256 => MemberInfo) private memberIdToMemberInfo;
     mapping(uint256 => SubGroupInfo) private subGroupIdToSubGroupInfo;
     mapping(uint256 => mapping(uint256 => ClaimInfo))
@@ -859,6 +857,7 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
             }
         }
         basePremium = totalCoverage / totalValidCount;
+        periodIdToPeriodInfo[periodId].coverage = totalCoverage;
         // minimumSavingAccountBalance = basePremium + ((basePremium * 20) / 100);
         emit CoverageUpdated(_coverage, basePremium);
     }
@@ -879,7 +878,7 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
         for (uint256 i = 0; i < _successors.length; i++) {
             bool isIn;
             for (uint256 j = 1; j < memberId + 1; j++) {
-                if (_successors[i] == memberIdToMemberInfo[memberId].member) {
+                if (_successors[i] == memberIdToMemberInfo[j].member) {
                     isIn = true;
                     break;
                 }
@@ -958,27 +957,15 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
                     secretarySuccessors.length - 1
                 ];
                 secretarySuccessors.pop();
+            } else {
+                revert NotFirstSuccessor();
             }
         }
         emit SecretaryAccepted(msg.sender);
     }
 
     function emergencyHandOverSecretary(address _eSecretary) public {
-        bool isInES;
-        for (uint256 i = 0; i < secretarySuccessors.length; i++) {
-            if (_eSecretary == secretarySuccessors[i]) {
-                isInES = true;
-            }
-        }
-        if (!isInES) {
-            revert NotIncluded();
-        }
         bool isIn;
-        // for (uint256 i = 0; i < memberId + 1; i++) {
-        //     if (msg.sender == memberIdToMemberInfo[i].member) {
-        //         isIn = true;
-        //     }
-        // }
         if (
             memberToMemberId[msg.sender] != 0 &&
             memberIdToMemberInfo[memberToMemberId[msg.sender]].status ==
@@ -989,36 +976,75 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
         if (!isIn) {
             revert NotIncluded();
         }
+        bool isInES;
+        for (uint256 i = 0; i < secretarySuccessors.length; i++) {
+            if (_eSecretary == secretarySuccessors[i]) {
+                isInES = true;
+            }
+        }
+        if (!isInES) {
+            revert NotInSuccessorList();
+        }
+
+        if (
+            _emergencySecretaries[0] == address(0) &&
+            _emergencySecretaries[1] == address(0) &&
+            emergencyHandOverStartedPeriod == periodId
+        ) {
+            revert SamePeriod();
+        }
         if (_emergencySecretaries[0] == address(0)) {
             _emergencySecretaries[0] = _eSecretary;
-            embergencyHandoverStartedAt = block.timestamp;
-            embergencyHandOverStartedPeriod = periodId;
+            emergencyHandoverStartedAt = block.timestamp;
+            emergencyHandOverStartedPeriod = periodId;
         } else {
-            // if (_emergencySecretaries[0] != address(0)) {
             if (
                 block.timestamp <
-                embergencyHandoverStartedAt + (1 * daysInSeconds) &&
-                embergencyHandOverStartedPeriod == periodId
+                emergencyHandoverStartedAt + (1 * daysInSeconds) &&
+                emergencyHandOverStartedPeriod == periodId
             ) {
                 _emergencySecretaries[1] = _eSecretary;
             } else {
-                _emergencySecretaries[0] = _eSecretary;
-                embergencyHandoverStartedAt = block.timestamp;
-                embergencyHandOverStartedPeriod = periodId;
+                if (
+                    block.timestamp >
+                    emergencyHandoverStartedAt + (1 * daysInSeconds) &&
+                    emergencyHandOverStartedPeriod != periodId
+                ) {
+                    _emergencySecretaries[0] = _eSecretary;
+                    emergencyHandoverStartedAt = block.timestamp;
+                    emergencyHandOverStartedPeriod = periodId;
+                } else {
+                    revert SamePeriod();
+                }
             }
         }
         if (
             _emergencySecretaries[0] != address(0) &&
             _emergencySecretaries[1] != address(0)
         ) {
+            uint256 index;
             if (_emergencySecretaries[0] == _emergencySecretaries[1]) {
-                upcomingSecretary = _emergencySecretaries[0];
+                // upcomingSecretary = _emergencySecretaries[0];
+                _secretary = _emergencySecretaries[0];
+
+                for (uint256 i = 0; i < secretarySuccessors.length; i++) {
+                    if (secretarySuccessors[i] == _emergencySecretaries[0]) {
+                        index = i;
+                    }
+                }
+            } else {
+                _secretary = secretarySuccessors[0];
+                index = 0;
             }
             // if (_emergencySecretaries[0] != _emergencySecretaries[1])
-            else {
-                _emergencySecretaries[0] = address(0);
-                _emergencySecretaries[1] = address(0);
-            }
+            // else {
+            _emergencySecretaries[0] = address(0);
+            _emergencySecretaries[1] = address(0);
+            secretarySuccessors[index] = secretarySuccessors[
+                secretarySuccessors.length - 1
+            ];
+            secretarySuccessors.pop();
+            // }
         }
         emit EmergencyhandOverSecretary(_eSecretary);
     }
@@ -1279,6 +1305,7 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
             }
         }
         pInfo.willEndAt = block.timestamp + (30 * daysInSeconds);
+        pInfo.coverage = totalCoverage;
         emit NextPeriodInitiated(periodId, totalCoverage, basePremium);
     }
 
@@ -1334,8 +1361,8 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
                     mInfo.status = MemberStatus.USER_LEFT;
                     mInfo.eligibleForCoverageInPeriod[periodId] = false;
                 }
+                emit MemberStatusUpdated(mInfo.member, mInfo.status);
             }
-            emit MemberStatusUpdated(mInfo.member, mInfo.status);
         }
     }
 
@@ -1497,6 +1524,7 @@ contract TandaPay is Secretary, ReentrancyGuard, TandaPayEvents {
         ];
 
         periodIdToClaimIds[periodId].push(claimId);
+        periodIdToPeriodInfo[periodId].claimIds.push(claimId);
         cInfo.id = claimId;
         cInfo.claimant = msg.sender;
         cInfo.SGId = memberIdToMemberInfo[memberToMemberId[msg.sender]]

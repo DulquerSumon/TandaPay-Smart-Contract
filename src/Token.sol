@@ -41,10 +41,6 @@ abstract contract Context {
     function _msgSender() internal view virtual returns (address) {
         return msg.sender;
     }
-
-    function _msgData() internal view virtual returns (bytes calldata) {
-        return msg.data;
-    }
 }
 
 interface IERC20Errors {
@@ -68,65 +64,10 @@ interface IERC20Errors {
     error ERC20InvalidSpender(address spender);
 }
 
-abstract contract Ownable is Context {
-    address private _owner;
-    error OwnableUnauthorizedAccount(address account);
-    error OwnableInvalidOwner(address owner);
-    event OwnershipTransferred(
-        address indexed previousOwner,
-        address indexed newOwner
-    );
-
-    constructor(address initialOwner) {
-        if (initialOwner == address(0)) {
-            revert OwnableInvalidOwner(address(0));
-        }
-        _transferOwnership(initialOwner);
-    }
-
-    modifier onlyOwner() {
-        _checkOwner();
-        _;
-    }
-
-    function owner() public view virtual returns (address) {
-        return _owner;
-    }
-
-    function _checkOwner() internal view virtual {
-        if (owner() != _msgSender()) {
-            revert OwnableUnauthorizedAccount(_msgSender());
-        }
-    }
-
-    function renounceOwnership() public virtual onlyOwner {
-        _transferOwnership(address(0));
-    }
-
-    function transferOwnership(address newOwner) public virtual onlyOwner {
-        if (newOwner == address(0)) {
-            revert OwnableInvalidOwner(address(0));
-        }
-        _transferOwnership(newOwner);
-    }
-
-    function _transferOwnership(address newOwner) internal virtual {
-        address oldOwner = _owner;
-        _owner = newOwner;
-        emit OwnershipTransferred(oldOwner, newOwner);
-    }
-}
-
-contract Token is Ownable, IERC20, IERC20Metadata, IERC20Errors {
-    error AlreadyItIs();
-    error BlackListed(address wallet);
+contract Token is IERC20, IERC20Metadata, IERC20Errors, Context {
     mapping(address => uint256) private _balances;
-
     mapping(address => mapping(address => uint256)) private _allowances;
-    mapping(address => bool) private isBlackListed;
-
     uint256 private _totalSupply;
-
     string private _name;
     string private _symbol;
 
@@ -136,7 +77,7 @@ contract Token is Ownable, IERC20, IERC20Metadata, IERC20Errors {
         uint256 requestedDecrease
     );
 
-    constructor(address _initialRecipient) Ownable(_initialRecipient) {
+    constructor(address _initialRecipient) {
         _name = "LUSD";
         _symbol = "LUSD";
         _mint(_initialRecipient, 10000000000000000000 * 10 ** 18);
@@ -160,16 +101,6 @@ contract Token is Ownable, IERC20, IERC20Metadata, IERC20Errors {
 
     function balanceOf(address account) public view virtual returns (uint256) {
         return _balances[account];
-    }
-
-    function addToBlackList(
-        address _wallet,
-        bool _isBlackList
-    ) public onlyOwner {
-        if (isBlackListed[_wallet] == _isBlackList) {
-            revert AlreadyItIs();
-        }
-        isBlackListed[_wallet] = _isBlackList;
     }
 
     function transfer(address to, uint256 value) public virtual returns (bool) {
@@ -235,12 +166,6 @@ contract Token is Ownable, IERC20, IERC20Metadata, IERC20Errors {
     }
 
     function _transfer(address from, address to, uint256 value) internal {
-        if (isBlackListed[from]) {
-            revert BlackListed(from);
-        }
-        if (isBlackListed[to]) {
-            revert BlackListed(to);
-        }
         if (from == address(0)) {
             revert ERC20InvalidSender(address(0));
         }

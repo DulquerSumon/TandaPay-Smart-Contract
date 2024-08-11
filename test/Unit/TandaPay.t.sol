@@ -901,6 +901,53 @@ contract TandaPayTest is Test {
         assertEq(uint8(AStatus1After), uint8(AStatus2After));
     }
 
+    function testIfMemberCanSuccessfullyRejectSubGroupAssignment() public {
+        uint256 mIdBefore = tandaPay.getCurrentMemberId();
+        vm.expectEmit(address(tandaPay));
+        emit TandaPayEvents.AddedToCommunity(member1, mIdBefore + 1);
+        tandaPay.addToCommunity(member1);
+        uint256 mIdAfter = tandaPay.getCurrentMemberId();
+        assertEq(mIdAfter, mIdBefore + 1);
+        tandaPay.createSubGroup();
+        uint256 gId = tandaPay.getCurrentSubGroupId();
+        assertEq(gId, uint256(1));
+        tandaPay.assignToSubGroup(member1, gId, false);
+        TandaPay.DemoMemberInfo memory mInfo = tandaPay.getMemberToMemberInfo(
+            member1,
+            0
+        );
+        assertEq(mInfo.associatedGroupId, gId);
+        assertEq(mInfo.member, member1);
+        TandaPay.AssignmentStatus AStatus1Before = mInfo.assignment;
+        TandaPay.AssignmentStatus AStatus2Before = TandaPay
+            .AssignmentStatus
+            .AssignedToGroup;
+        assertEq(uint8(AStatus1Before), uint8(AStatus2Before));
+        vm.startPrank(member1);
+        tandaPay.approveSubGroupAssignment(false);
+        vm.stopPrank();
+
+        TandaPay.DemoMemberInfo memory mInfo2 = tandaPay.getMemberToMemberInfo(
+            member1,
+            0
+        );
+        assertEq(mInfo2.associatedGroupId, gId);
+        assertEq(mInfo2.member, member1);
+        assertEq(
+            uint8(mInfo2.status),
+            uint8(TandaPayEvents.MemberStatus.USER_QUIT)
+        );
+        TandaPay.SubGroupInfo memory sInfo = tandaPay
+            .getSubGroupIdToSubGroupInfo(gId);
+        bool notIn = true;
+        for (uint256 i = 0; i < sInfo.members.length; i++) {
+            if (sInfo.members[i] == mInfo2.member) {
+                notIn = false;
+            }
+        }
+        assertTrue(notIn);
+    }
+
     function testIfRevertIfMemberIsNotReorgingWhileGroupMemberApprovingNewMember()
         public
     {
@@ -1396,6 +1443,14 @@ contract TandaPayTest is Test {
         emit TandaPayEvents.ExitedFromSubGroup(member1, gIdAfter);
         tandaPay.exitSubGroup();
         vm.stopPrank();
+        TandaPay.DemoMemberInfo memory mInfo2 = tandaPay.getMemberToMemberInfo(
+            member1,
+            0
+        );
+        assertEq(
+            uint8(mInfo2.status),
+            uint8(TandaPayEvents.MemberStatus.UNPAID_INVALID)
+        );
     }
 
     function testIfRevertSecretaryIsNotCallingWhiteListCalimFunction() public {
@@ -2359,7 +2414,7 @@ contract TandaPayTest is Test {
         assertEq(uint8(states), uint8(TandaPay.CommunityStates.COLLAPSED));
         vm.startPrank(member1);
         vm.expectRevert(
-            abi.encodeWithSelector(TandaPay.NotInDefOrFra.selector)
+            abi.encodeWithSelector(TandaPay.ManuallyCollapsed.selector)
         );
         tandaPay.payPremium(false);
         vm.stopPrank();
@@ -3552,8 +3607,20 @@ contract TandaPayTest is Test {
     function testIfRevertIfPrefferedSuccessorIsNotAValidMemberWhileHandingOverSecretary()
         public
     {
+        addToCommunity(member1);
+        addToCommunity(member2);
+        successors.push(member1);
+        successors.push(member2);
+        vm.expectEmit(address(tandaPay));
+        emit TandaPayEvents.SecretarySuccessorsDefined(successors);
+        tandaPay.defineSecretarySuccessor(successors);
+        address[] memory _successors = tandaPay.getSecretarySuccessors();
+        assertEq(successors[0], _successors[0]);
+        assertEq(successors[1], _successors[1]);
+        assertEq(_successors[0], member1);
+        assertEq(_successors[1], member2);
         vm.expectRevert(abi.encodeWithSelector(TandaPay.NotIncluded.selector));
-        tandaPay.handoverSecretary(member1);
+        tandaPay.handoverSecretary(member12);
     }
 
     function testIfSecretaryCanSuccessfullyEnableSecretaryHandover() public {
@@ -3881,12 +3948,26 @@ contract TandaPayTest is Test {
         approveSubGroupAssignment(member12, shouldJoin);
         payPremium(member12, pFee, currentPeriodIdAfter, false);
         skip(3 days);
+        successors.push(member1);
+        successors.push(member2);
+        successors.push(member3);
+        successors.push(member4);
+        successors.push(member5);
 
+        vm.expectEmit(address(tandaPay));
+        emit TandaPayEvents.SecretarySuccessorsDefined(successors);
+        tandaPay.defineSecretarySuccessor(successors);
+        address[] memory secretarySuccessorList = tandaPay
+            .getSecretarySuccessors();
+        assertEq(secretarySuccessorList[0], successors[0]);
+        assertEq(secretarySuccessorList[1], successors[1]);
+        assertEq(secretarySuccessorList[2], successors[2]);
+        assertEq(secretarySuccessorList[3], successors[3]);
         vm.startPrank(member1);
         vm.expectRevert(
             abi.encodeWithSelector(TandaPay.NotInSuccessorList.selector)
         );
-        tandaPay.emergencyHandOverSecretary(member2);
+        tandaPay.emergencyHandOverSecretary(member12);
         vm.stopPrank();
     }
 
@@ -5990,7 +6071,6 @@ contract TandaPayTest is Test {
         basePremium = tandaPay.getBasePremium();
         pFee = basePremium + ((basePremium * 20) / 100);
         skip(23 days);
-        payPremium(member1, pFee, currentPeriodIdAfter2, true);
         payPremium(member2, pFee, currentPeriodIdAfter2, true);
         payPremium(member3, pFee, currentPeriodIdAfter2, true);
         payPremium(member4, pFee, currentPeriodIdAfter2, true);
@@ -6006,7 +6086,7 @@ contract TandaPayTest is Test {
         vm.expectEmit(address(tandaPay));
         emit TandaPayEvents.MemberStatusUpdated(
             member1,
-            TandaPayEvents.MemberStatus.VALID
+            TandaPayEvents.MemberStatus.UNPAID_INVALID
         );
         emit TandaPayEvents.MemberStatusUpdated(
             member2,
@@ -6061,9 +6141,9 @@ contract TandaPayTest is Test {
         uint256 currentPeriodIdAfter3 = tandaPay.getPeriodId();
         assertEq(currentPeriodIdBefore3 + 1, currentPeriodIdAfter3);
         uint256 cIdBefore = tandaPay.getCurrentClaimId();
-        vm.startPrank(member1);
+        vm.startPrank(member2);
         vm.expectEmit(address(tandaPay));
-        emit TandaPayEvents.ClaimSubmitted(member1, cIdBefore + 1);
+        emit TandaPayEvents.ClaimSubmitted(member2, cIdBefore + 1);
         tandaPay.submitClaim();
         vm.stopPrank();
         uint256 cIdAfter = tandaPay.getCurrentClaimId();
@@ -6071,6 +6151,7 @@ contract TandaPayTest is Test {
         TandaPay.PeriodInfo memory pInfo3 = tandaPay.getPeriodIdToPeriodInfo(
             currentPeriodIdAfter3
         );
+        uint256 sAmount = pInfo3.coverage - pInfo3.totalPaid;
         uint256 validMCount;
         uint256 mvAmount;
         for (uint256 i = 1; i < tandaPay.getCurrentSubGroupId() + 1; i++) {
@@ -6088,13 +6169,13 @@ contract TandaPayTest is Test {
                         if (mvAmount != 0 && mInfo.ISEscorwAmount < mvAmount) {
                             mvAmount = mInfo.ISEscorwAmount;
                         } else if (mvAmount == 0) {
-                            mvAmount = mInfo.ISEscorwAmount;
+                            mvAmount = sAmount;
                         }
                     }
                 }
             }
         }
-        uint256 sAmount = pInfo3.coverage - pInfo3.totalPaid;
+
         uint256 spMember = sAmount / validMCount < mvAmount
             ? sAmount / validMCount
             : mvAmount;
@@ -6102,8 +6183,16 @@ contract TandaPayTest is Test {
         if (spMember * validMCount < sAmount) {
             secretaryAmount = sAmount - (spMember * validMCount);
         }
-        vm.expectEmit(address(paymentToken));
-        emit IERC20.Transfer(address(this), address(tandaPay), secretaryAmount);
+        vm.expectCall(
+            address(paymentToken),
+            abi.encodeWithSelector(
+                paymentToken.transferFrom.selector,
+                msg.sender,
+                address(this),
+                0
+            ),
+            0
+        );
         vm.expectEmit(address(tandaPay));
         emit TandaPayEvents.ShortFallDivided(
             sAmount,
@@ -8203,6 +8292,7 @@ contract TandaPayTest is Test {
         emit TandaPayEvents.FundClaimed(cInfo.claimant, cAmount, cInfo.id);
         tandaPay.withdrawClaimFund();
         vm.stopPrank();
+        tandaPay.getCommunityState();
         uint256 claimantBalanceAfter = paymentToken.balanceOf(cInfo.claimant);
         cInfo = tandaPay.getPeriodIdToClaimIdToClaimInfo(
             currentPeriodIdAfter2,
@@ -9209,276 +9299,5 @@ contract TandaPayTest is Test {
         vm.expectEmit(address(tandaPay));
         emit TandaPayEvents.RefundIssued();
         tandaPay.issueRefund(false);
-    }
-
-    function testIfRevertIfTheWithdrawAmountIsZeroWhileWithdrawingRefund()
-        public
-    {
-        addToCommunity(member1);
-        addToCommunity(member2);
-        addToCommunity(member3);
-        addToCommunity(member4);
-        addToCommunity(member5);
-        addToCommunity(member6);
-        addToCommunity(member7);
-        addToCommunity(member8);
-        addToCommunity(member9);
-        addToCommunity(member10);
-        addToCommunity(member11);
-        addToCommunity(member12);
-
-        uint256 sgId1 = createASubGroup();
-        uint256 sgId2 = createASubGroup();
-        uint256 sgId3 = createASubGroup();
-
-        assignToSubGroup(member1, sgId1, 1);
-        assignToSubGroup(member2, sgId1, 2);
-        assignToSubGroup(member3, sgId1, 3);
-        assignToSubGroup(member4, sgId1, 4);
-        assignToSubGroup(member5, sgId2, 1);
-        assignToSubGroup(member6, sgId2, 2);
-        assignToSubGroup(member7, sgId2, 3);
-        assignToSubGroup(member8, sgId2, 4);
-        assignToSubGroup(member9, sgId3, 1);
-        assignToSubGroup(member10, sgId3, 2);
-        assignToSubGroup(member11, sgId3, 3);
-        assignToSubGroup(member12, sgId3, 4);
-
-        uint256 coverage = 12e18;
-        vm.expectEmit(address(tandaPay));
-        emit TandaPayEvents.DefaultStateInitiatedAndCoverageSet(coverage);
-        tandaPay.initiatDefaultStateAndSetCoverage(coverage);
-        TandaPay.CommunityStates states = tandaPay.getCommunityState();
-        assertEq(uint8(states), uint8(TandaPay.CommunityStates.DEFAULT));
-        uint256 currentCoverage = tandaPay.getTotalCoverage();
-        assertEq(currentCoverage, coverage);
-        uint256 currentMemberId = tandaPay.getCurrentMemberId();
-        basePremium = tandaPay.getBasePremium();
-        assertEq(basePremium, currentCoverage / currentMemberId);
-        uint256 bPAmount = tandaPay.getBasePremium();
-        uint256 joinFee = ((bPAmount + (bPAmount * 20) / 100) * 11) / 12;
-
-        joinToCommunity(member1, joinFee);
-        joinToCommunity(member2, joinFee);
-        joinToCommunity(member3, joinFee);
-        joinToCommunity(member4, joinFee);
-        joinToCommunity(member5, joinFee);
-        joinToCommunity(member6, joinFee);
-        joinToCommunity(member7, joinFee);
-        joinToCommunity(member8, joinFee);
-        joinToCommunity(member9, joinFee);
-        joinToCommunity(member10, joinFee);
-        joinToCommunity(member11, joinFee);
-        joinToCommunity(member12, joinFee);
-
-        uint256 currentPeriodIdBefore = tandaPay.getPeriodId();
-        vm.expectEmit(address(tandaPay));
-        emit TandaPayEvents.NextPeriodInitiated(
-            currentPeriodIdBefore + 1,
-            currentCoverage,
-            basePremium
-        );
-        tandaPay.AdvanceToTheNextPeriod();
-        uint256 currentPeriodIdAfter = tandaPay.getPeriodId();
-        assertEq(currentPeriodIdBefore + 1, currentPeriodIdAfter);
-        TandaPay.PeriodInfo memory pInfo = tandaPay.getPeriodIdToPeriodInfo(
-            currentPeriodIdAfter
-        );
-        assertEq(pInfo.startedAt + 30 days, pInfo.willEndAt);
-
-        skip(27 days);
-
-        basePremium = tandaPay.getBasePremium();
-        uint256 pFee = basePremium + ((basePremium * 20) / 100);
-        bool shouldJoin = true;
-
-        approveSubGroupAssignment(member1, shouldJoin);
-        payPremium(member1, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member2, shouldJoin);
-        payPremium(member2, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member3, shouldJoin);
-        payPremium(member3, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member4, shouldJoin);
-        payPremium(member4, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member5, shouldJoin);
-        payPremium(member5, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member6, shouldJoin);
-        payPremium(member6, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member7, shouldJoin);
-        payPremium(member7, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member8, shouldJoin);
-        payPremium(member8, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member9, shouldJoin);
-        payPremium(member9, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member10, shouldJoin);
-        payPremium(member10, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member11, shouldJoin);
-        payPremium(member11, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member12, shouldJoin);
-        payPremium(member12, pFee, currentPeriodIdAfter, false);
-
-        skip(3 days);
-        uint256 currentPeriodIdBefore2 = tandaPay.getPeriodId();
-        vm.expectEmit(address(tandaPay));
-        emit TandaPayEvents.NextPeriodInitiated(
-            currentPeriodIdBefore2 + 1,
-            currentCoverage,
-            basePremium
-        );
-        tandaPay.AdvanceToTheNextPeriod();
-        uint256 currentPeriodIdAfter2 = tandaPay.getPeriodId();
-        assertEq(currentPeriodIdBefore2 + 1, currentPeriodIdAfter2);
-        skip(4 days);
-        vm.startPrank(member1);
-        vm.expectRevert(abi.encodeWithSelector(TandaPay.AmountZero.selector));
-        tandaPay.withdrawRefund();
-        vm.stopPrank();
-    }
-
-    function testIfMemberCanSuccessfullyWithdrawRefundToken() public {
-        addToCommunity(member1);
-        addToCommunity(member2);
-        addToCommunity(member3);
-        addToCommunity(member4);
-        addToCommunity(member5);
-        addToCommunity(member6);
-        addToCommunity(member7);
-        addToCommunity(member8);
-        addToCommunity(member9);
-        addToCommunity(member10);
-        addToCommunity(member11);
-        addToCommunity(member12);
-
-        uint256 sgId1 = createASubGroup();
-        uint256 sgId2 = createASubGroup();
-        uint256 sgId3 = createASubGroup();
-
-        assignToSubGroup(member1, sgId1, 1);
-        assignToSubGroup(member2, sgId1, 2);
-        assignToSubGroup(member3, sgId1, 3);
-        assignToSubGroup(member4, sgId1, 4);
-        assignToSubGroup(member5, sgId2, 1);
-        assignToSubGroup(member6, sgId2, 2);
-        assignToSubGroup(member7, sgId2, 3);
-        assignToSubGroup(member8, sgId2, 4);
-        assignToSubGroup(member9, sgId3, 1);
-        assignToSubGroup(member10, sgId3, 2);
-        assignToSubGroup(member11, sgId3, 3);
-        assignToSubGroup(member12, sgId3, 4);
-
-        uint256 coverage = 12e18;
-        vm.expectEmit(address(tandaPay));
-        emit TandaPayEvents.DefaultStateInitiatedAndCoverageSet(coverage);
-        tandaPay.initiatDefaultStateAndSetCoverage(coverage);
-        TandaPay.CommunityStates states = tandaPay.getCommunityState();
-        assertEq(uint8(states), uint8(TandaPay.CommunityStates.DEFAULT));
-        uint256 currentCoverage = tandaPay.getTotalCoverage();
-        assertEq(currentCoverage, coverage);
-        uint256 currentMemberId = tandaPay.getCurrentMemberId();
-        basePremium = tandaPay.getBasePremium();
-        assertEq(basePremium, currentCoverage / currentMemberId);
-        uint256 bPAmount = tandaPay.getBasePremium();
-        uint256 joinFee = ((bPAmount + (bPAmount * 20) / 100) * 11) / 12;
-
-        joinToCommunity(member1, joinFee);
-        joinToCommunity(member2, joinFee);
-        joinToCommunity(member3, joinFee);
-        joinToCommunity(member4, joinFee);
-        joinToCommunity(member5, joinFee);
-        joinToCommunity(member6, joinFee);
-        joinToCommunity(member7, joinFee);
-        joinToCommunity(member8, joinFee);
-        joinToCommunity(member9, joinFee);
-        joinToCommunity(member10, joinFee);
-        joinToCommunity(member11, joinFee);
-        joinToCommunity(member12, joinFee);
-
-        uint256 currentPeriodIdBefore = tandaPay.getPeriodId();
-        vm.expectEmit(address(tandaPay));
-        emit TandaPayEvents.NextPeriodInitiated(
-            currentPeriodIdBefore + 1,
-            currentCoverage,
-            basePremium
-        );
-        tandaPay.AdvanceToTheNextPeriod();
-        uint256 currentPeriodIdAfter = tandaPay.getPeriodId();
-        assertEq(currentPeriodIdBefore + 1, currentPeriodIdAfter);
-        TandaPay.PeriodInfo memory pInfo = tandaPay.getPeriodIdToPeriodInfo(
-            currentPeriodIdAfter
-        );
-        assertEq(pInfo.startedAt + 30 days, pInfo.willEndAt);
-
-        skip(27 days);
-
-        basePremium = tandaPay.getBasePremium();
-        uint256 pFee = basePremium + ((basePremium * 20) / 100);
-        bool shouldJoin = true;
-
-        approveSubGroupAssignment(member1, shouldJoin);
-        payPremium(member1, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member2, shouldJoin);
-        payPremium(member2, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member3, shouldJoin);
-        payPremium(member3, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member4, shouldJoin);
-        payPremium(member4, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member5, shouldJoin);
-        payPremium(member5, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member6, shouldJoin);
-        payPremium(member6, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member7, shouldJoin);
-        payPremium(member7, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member8, shouldJoin);
-        payPremium(member8, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member9, shouldJoin);
-        payPremium(member9, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member10, shouldJoin);
-        payPremium(member10, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member11, shouldJoin);
-        payPremium(member11, pFee, currentPeriodIdAfter, false);
-        approveSubGroupAssignment(member12, shouldJoin);
-        payPremium(member12, pFee, currentPeriodIdAfter, false);
-
-        skip(3 days);
-        uint256 currentPeriodIdBefore2 = tandaPay.getPeriodId();
-        vm.expectEmit(address(tandaPay));
-        emit TandaPayEvents.NextPeriodInitiated(
-            currentPeriodIdBefore2 + 1,
-            currentCoverage,
-            basePremium
-        );
-        tandaPay.AdvanceToTheNextPeriod();
-        uint256 currentPeriodIdAfter2 = tandaPay.getPeriodId();
-        assertEq(currentPeriodIdBefore2 + 1, currentPeriodIdAfter2);
-        skip(4 days);
-        vm.expectEmit(address(tandaPay));
-        emit TandaPayEvents.RefundIssued();
-        tandaPay.issueRefund(false);
-
-        vm.startPrank(member1);
-        TandaPay.DemoMemberInfo memory mInfo1Before = tandaPay
-            .getMemberToMemberInfo(member1, currentPeriodIdAfter2);
-        uint256 m1BalanceBefore = paymentToken.balanceOf(member1);
-        vm.expectEmit(address(paymentToken));
-        emit IERC20.Transfer(
-            address(tandaPay),
-            member1,
-            mInfo1Before.availableToWithdraw
-        );
-        vm.expectEmit(address(tandaPay));
-        emit TandaPayEvents.RefundWithdrawn(
-            member1,
-            mInfo1Before.availableToWithdraw
-        );
-        tandaPay.withdrawRefund();
-        TandaPay.DemoMemberInfo memory mInfo1After = tandaPay
-            .getMemberToMemberInfo(member1, currentPeriodIdAfter2);
-        vm.stopPrank();
-        uint256 m1BalanceAfter = paymentToken.balanceOf(member1);
-        assertEq(
-            m1BalanceBefore + mInfo1Before.availableToWithdraw,
-            m1BalanceAfter
-        );
-        assertEq(mInfo1After.availableToWithdraw, 0);
     }
 }
